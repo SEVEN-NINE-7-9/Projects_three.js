@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Hologram Globe</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #00050a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 40px;
+            box-sizing: border-box;
+            color: #00f2ff;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            z-index: 10;
+        }
+
+        .header {
+            border-left: 3px solid #00f2ff;
+            padding-left: 20px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 300;
+            text-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
+        }
+
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            font-size: 12px;
+            opacity: 0.7;
+        }
+
+        .data-stream {
+            position: absolute;
+            right: 40px;
+            top: 50%;
+            transform: translateY(-50%);
+            text-align: right;
+            font-family: monospace;
+            line-height: 1.5;
+            color: #00f2ff;
+            font-size: 10px;
+        }
+
+        /* Scanline effect */
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                to bottom,
+                rgba(18, 16, 16, 0) 50%,
+                rgba(0, 0, 0, 0.1) 50%
+            );
+            background-size: 100% 4px;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        .vignette {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            box-shadow: inset 0 0 150px rgba(0,0,0,0.8);
+            z-index: 6;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="scanlines"></div>
+    <div class="vignette"></div>
+
+    <div class="ui-overlay">
+        <div class="header">
+            <h1>Global Network Interface</h1>
+            <div>System Status: Active</div>
+        </div>
+
+        <div class="data-stream" id="data-stream">
+            <!-- Data will be populated by JS -->
+        </div>
+
+        <div class="footer">
+            <div>Latitude: <span id="lat">0.00</span><br>Longitude: <span id="lng">0.00</span></div>
+            <div>&copy; 2024 NEXUS CORP / SECURE CHANNEL 09</div>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <!-- Import Three.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        let scene, camera, renderer, globe, particles, rings = [];
+        const container = document.getElementById('canvas-container');
+
+        function init() {
+            // Scene & Camera setup
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 180;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambientLight);
+
+            const pointLight = new THREE.PointLight(0x00f2ff, 1.5);
+            pointLight.position.set(100, 100, 100);
+            scene.add(pointLight);
+
+            createGlobe();
+            createParticles();
+            createRings();
+            
+            window.addEventListener('resize', onWindowResize, false);
+            document.addEventListener('mousemove', onMouseMove, false);
+            
+            generateDataStream();
+            animate();
+        }
+
+        function createGlobe() {
+            // Inner Core
+            const geometry = new THREE.SphereGeometry(60, 64, 64);
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x001a2e,
+                emissive: 0x003366,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.3
+            });
+            globe = new THREE.Mesh(geometry, material);
+            scene.add(globe);
+
+            // Outer Glow/Wireframe Shell
+            const shellGeo = new THREE.SphereGeometry(61, 32, 32);
+            const shellMat = new THREE.MeshBasicMaterial({
+                color: 0x00f2ff,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.1
+            });
+            const shell = new THREE.Mesh(shellGeo, shellMat);
+            globe.add(shell);
+
+            // Add inner solid point core
+            const coreGeo = new THREE.SphereGeometry(15, 16, 16);
+            const coreMat = new THREE.MeshBasicMaterial({ color: 0x00f2ff });
+            const core = new THREE.Mesh(coreGeo, coreMat);
+            globe.add(core);
+        }
+
+        function createRings() {
+            const ringColors = [0x00f2ff, 0x0077ff, 0x00ffff];
+            
+            for (let i = 0; i < 4; i++) {
+                const radius = 80 + (i * 15);
+                const segments = 128;
+                const ringGeo = new THREE.RingGeometry(radius, radius + 0.5, segments);
+                
+                // Create dashed effect using a custom shader or simple rotation logic
+                const ringMat = new THREE.MeshBasicMaterial({
+                    color: ringColors[i % 3],
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.4 - (i * 0.1)
+                });
+                
+                const ring = new THREE.Mesh(ringGeo, ringMat);
+                ring.rotation.x = Math.random() * Math.PI;
+                ring.rotation.y = Math.random() * Math.PI;
+                
+                scene.add(ring);
+                rings.push({
+                    mesh: ring,
+                    speed: 0.005 + (Math.random() * 0.01)
+                });
+            }
+        }
+
+        function createParticles() {
+            const particleCount = 2000;
+            const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const colors = new Float32Array(particleCount * 3);
+
+            for (let i = 0; i < particleCount; i++) {
+                // Spherical distribution
+                const r = 100 + Math.random() * 200;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+
+                positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+                positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+                positions[i * 3 + 2] = r * Math.cos(phi);
+
+                colors[i * 3] = 0;
+                colors[i * 3 + 1] = 0.95; // Cyan G
+                colors[i * 3 + 2] = 1;    // Cyan B
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: 1.5,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.6,
+                blending: THREE.AdditiveBlending
+            });
+
+            particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        let mouseX = 0, mouseY = 0;
+        function onMouseMove(event) {
+            mouseX = (event.clientX - window.innerWidth / 2) / 100;
+            mouseY = (event.clientY - window.innerHeight / 2) / 100;
+        }
+
+        function generateDataStream() {
+            const stream = document.getElementById('data-stream');
+            setInterval(() => {
+                const lines = stream.innerText.split('\n');
+                if (lines.length > 15) lines.shift();
+                
+                const randomHex = Math.random().toString(16).substring(2, 10).toUpperCase();
+                const randomVal = (Math.random() * 100).toFixed(2);
+                lines.push(`PKT_${randomHex}: ${randomVal}%`);
+                
+                stream.innerText = lines.join('\n');
+                
+                // Update footer stats
+                document.getElementById('lat').innerText = (Math.random() * 180 - 90).toFixed(4);
+                document.getElementById('lng').innerText = (Math.random() * 360 - 180).toFixed(4);
+            }, 500);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Globe Rotation
+            globe.rotation.y += 0.002;
+            globe.rotation.x += 0.001;
+
+            // Follow mouse slightly
+            scene.rotation.y += (mouseX - scene.rotation.y) * 0.05;
+            scene.rotation.x += (mouseY - scene.rotation.x) * 0.05;
+
+            // Particles movement
+            particles.rotation.y -= 0.0005;
+
+            // Rings movement
+            rings.forEach(r => {
+                r.mesh.rotation.z += r.speed;
+                r.mesh.rotation.y += r.speed / 2;
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
